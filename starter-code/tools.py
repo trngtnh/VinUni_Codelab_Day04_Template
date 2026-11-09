@@ -22,9 +22,23 @@ def search_product_catalog(category: str, max_price: int = 999999999999) -> List
         Danh sách sản phẩm phù hợp điều kiện.
     """
     catalog_file = os.path.join(RAW_DATA_DIR, "product_catalog.json")
-    # TODO: Kiểm tra file tồn tại, đọc JSON, lọc sản phẩm
-    # Gợi ý: Lọc theo p["category"] == category AND p["price_vnd"] <= max_price
-    return []
+    if not os.path.exists(catalog_file):
+        return [{"error": "Product catalog file not found."}]
+
+    try:
+        with open(catalog_file, "r", encoding="utf-8") as f:
+            products = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        return [{"error": f"Unable to read product catalog: {exc}"}]
+
+    if not isinstance(products, list):
+        return [{"error": "Product catalog must contain a JSON list."}]
+
+    return [
+        p for p in products
+        if p["category"].lower() == category.strip().lower()
+        and p["price_vnd"] <= max_price
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -49,9 +63,62 @@ def submit_support_ticket(
         Thông tin ticket vừa tạo bao gồm ticket_id, status.
     """
     tickets_file = os.path.join(RAW_DATA_DIR, "support_tickets.json")
-    # TODO: Load existing tickets, generate new ticket_id, append new ticket, save file
-    # Gợi ý: ticket_id = f"TK-{today}-{seq:03d}" với today = datetime.now().strftime("%Y%m%d")
-    return {"ticket_id": "TODO", "status": "TODO"}
+    from datetime import timedelta, timezone
+
+    customer_name = customer_name.strip()
+    issue_description = issue_description.strip()
+    priority = priority.strip().lower()
+    if not customer_name or not issue_description:
+        return {"error": "Customer name and issue description are required."}
+    if priority not in ("low", "medium", "high"):
+        return {"error": "Priority must be low, medium or high."}
+
+    existing_tickets = []
+    try:
+        if os.path.exists(tickets_file):
+            with open(tickets_file, "r", encoding="utf-8") as f:
+                existing_tickets = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"error": f"Unable to read support tickets: {exc}"}
+
+    if not isinstance(existing_tickets, list) or any(
+        not isinstance(ticket, dict) for ticket in existing_tickets
+    ):
+        return {"error": "Support tickets must contain a JSON list of objects."}
+
+    now = datetime.now(timezone(timedelta(hours=7)))
+    today = now.strftime("%Y%m%d")
+    seq = len(existing_tickets) + 1
+    existing_ids = {ticket.get("ticket_id") for ticket in existing_tickets}
+    ticket_id = f"TK-{today}-{seq:03d}"
+    while ticket_id in existing_ids:
+        seq += 1
+        ticket_id = f"TK-{today}-{seq:03d}"
+
+    new_ticket = {
+        "ticket_id": ticket_id,
+        "customer_name": customer_name,
+        "issue_description": issue_description,
+        "priority": priority,
+        "status": "open",
+        "created_at": now.isoformat(),
+        "category": "general"
+    }
+    existing_tickets.append(new_ticket)
+
+    try:
+        with open(tickets_file, "w", encoding="utf-8") as f:
+            json.dump(existing_tickets, f, indent=2, ensure_ascii=False)
+    except OSError as exc:
+        return {"error": f"Unable to save support ticket: {exc}"}
+
+    return {
+        "ticket_id": ticket_id,
+        "customer_name": customer_name,
+        "priority": priority,
+        "status": "open",
+        "message": f"Ticket {ticket_id} đã được tạo thành công."
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -60,8 +127,55 @@ def submit_support_ticket(
 # ---------------------------------------------------------------------------
 
 TOOL_DEFINITIONS = [
-    # TODO: Thêm schema cho "search_product_catalog"
-    # TODO: Thêm schema cho "submit_support_ticket"
+    {
+        "name": "search_product_catalog",
+        "description": "Tra cứu sản phẩm VinFast hoặc dịch vụ Vinpearl theo danh mục và giá tối đa bằng VND.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "Danh mục xe điện VinFast hoặc du lịch Vinpearl.",
+                    "enum": ["xe_dien", "du_lich"]
+                },
+                "max_price": {
+                    "type": "integer",
+                    "description": "Giá tối đa bằng VND; bỏ qua để dùng giới hạn mặc định.",
+                    "minimum": 0,
+                    "default": 999999999999
+                }
+            },
+            "required": ["category"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "submit_support_ticket",
+        "description": "Tạo và lưu yêu cầu hỗ trợ của khách hàng; trả về mã ticket, tên khách, độ ưu tiên và trạng thái.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "customer_name": {
+                    "type": "string",
+                    "description": "Tên khách hàng cần hỗ trợ, lấy từ thông tin khách cung cấp.",
+                    "minLength": 1
+                },
+                "issue_description": {
+                    "type": "string",
+                    "description": "Mô tả vấn đề hoặc phản hồi khách muốn ghi nhận.",
+                    "minLength": 1
+                },
+                "priority": {
+                    "type": "string",
+                    "description": "Mức ưu tiên: low (thấp), medium (trung bình), high (khẩn cấp hoặc nghiêm trọng).",
+                    "enum": ["low", "medium", "high"],
+                    "default": "medium"
+                }
+            },
+            "required": ["customer_name", "issue_description"],
+            "additionalProperties": False
+        }
+    }
 ]
 
 
